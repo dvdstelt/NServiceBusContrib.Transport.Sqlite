@@ -13,14 +13,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- SQLite CVE in the native e_sqlite3 library bundled by SQLitePCLRaw 2.1.11, the newest
-         stable version Microsoft.Data.Sqlite supports. No fixed stable release exists yet
-         (2.1.12 is prerelease-only). Remove this suppression once Microsoft.Data.Sqlite
-         references a fixed SQLitePCLRaw. -->
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
-  </ItemGroup>
-
-  <ItemGroup>
     <InternalsVisibleTo Include="NServiceBusContrib.Transport.Sqlite.Tests" />
   </ItemGroup>
 

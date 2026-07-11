@@ -1,0 +1,10 @@
+[*.cs]
+
+# Justification: test methods do not need to take CancellationToken
+dotnet_diagnostic.PS0018.severity = suggestion
+
+# Justification: test helper delegates do not need CancellationToken type arguments
+dotnet_diagnostic.PS0013.severity = suggestion
+
+# Justification: test code does not need ConfigureAwait(false)
+dotnet_diagnostic.CA2007.severity = none
