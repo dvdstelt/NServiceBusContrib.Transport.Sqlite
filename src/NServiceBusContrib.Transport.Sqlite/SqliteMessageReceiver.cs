@@ -26,6 +26,7 @@ sealed class SqliteMessageReceiver : IMessageReceiver
     readonly string fetchSql;
     readonly string completeSql;
     readonly string releaseSql;
+    readonly string renewSql;
     readonly string reinsertSql;
     readonly string purgeExpiredSql;
     readonly bool leaseBased;
@@ -71,6 +72,7 @@ sealed class SqliteMessageReceiver : IMessageReceiver
             : $"DELETE FROM {queueTable} WHERE Seq = ({eligible}) RETURNING Seq, Id, Headers, Body;";
         completeSql = $"DELETE FROM {queueTable} WHERE Seq = @Seq AND LeaseId = @LeaseId;";
         releaseSql = $"UPDATE {queueTable} SET LockedUntil = NULL, LeaseId = NULL WHERE Seq = @Seq AND LeaseId = @LeaseId;";
+        renewSql = $"UPDATE {queueTable} SET LockedUntil = @LockedUntil WHERE Seq = @Seq AND LeaseId = @LeaseId;";
         reinsertSql = $"INSERT INTO {queueTable} (Id, Headers, Body, Expires) VALUES (@Id, @Headers, @Body, NULL);";
         purgeExpiredSql = $"DELETE FROM {queueTable} WHERE Expires IS NOT NULL AND Expires <= @Now AND (LockedUntil IS NULL OR LockedUntil <= @Now);";
     }
@@ -141,12 +143,15 @@ sealed class SqliteMessageReceiver : IMessageReceiver
             }
         }
 
+        // Wait for in-flight messages without observing the caller's token: a cancelled token has
+        // already cancelled processing (registration above), so the in-flight handlers finish
+        // promptly and StopReceive must still complete rather than throw.
         var currentLimiter = limiter;
         if (currentLimiter != null)
         {
             for (var i = 0; i < maxConcurrency; i++)
             {
-                await currentLimiter.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await currentLimiter.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
             currentLimiter.Dispose();
@@ -296,29 +301,78 @@ sealed class SqliteMessageReceiver : IMessageReceiver
             transportTransaction.Set(pending);
         }
 
+        // Context items set during onMessage must float to the error context.
+        var contextBag = new ContextBag();
+
+        using var leaseRenewal = message.LeaseId != null ? new CancellationTokenSource() : null;
+        var leaseRenewalTask = leaseRenewal != null ? RenewLease(message, leaseRenewal.Token) : Task.CompletedTask;
         try
         {
-            var context = new MessageContext(message.Id, new Dictionary<string, string>(headers), body, transportTransaction, ReceiveAddress, new ContextBag());
-            await onMessage!(context, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await Abandon(message, CancellationToken.None).ConfigureAwait(false);
-            return;
-        }
-        catch (Exception exception)
-        {
-            await HandleFailure(message, headers, body, exception, cancellationToken).ConfigureAwait(false);
-            return;
-        }
+            try
+            {
+                var context = new MessageContext(message.Id, new Dictionary<string, string>(headers), body, transportTransaction, ReceiveAddress, contextBag);
+                await onMessage!(context, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await Abandon(message, CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception exception)
+            {
+                await HandleFailure(message, headers, body, exception, contextBag, cancellationToken).ConfigureAwait(false);
+                return;
+            }
 
-        if (await TryComplete(message, pending, cancellationToken).ConfigureAwait(false))
+            if (await TryComplete(message, pending, cancellationToken).ConfigureAwait(false))
+            {
+                failureCounts.TryRemove(message.Id, out _);
+            }
+        }
+        finally
         {
-            failureCounts.TryRemove(message.Id, out _);
+            if (leaseRenewal != null)
+            {
+                await leaseRenewal.CancelAsync().ConfigureAwait(false);
+                await leaseRenewalTask.ConfigureAwait(false);
+            }
         }
     }
 
-    async Task HandleFailure(FetchedMessage message, Dictionary<string, string> headers, ReadOnlyMemory<byte> body, Exception exception, CancellationToken cancellationToken)
+    async Task RenewLease(FetchedMessage message, CancellationToken cancellationToken)
+    {
+        var interval = TimeSpan.FromMilliseconds(Math.Max(transport.MessageLeaseDuration.TotalMilliseconds / 2, 50));
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+
+                await using var connection = await connectionFactory.OpenConnection(cancellationToken).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                command.CommandText = renewSql;
+                command.Parameters.AddWithValue("@LockedUntil", DateTimeOffset.UtcNow.Add(transport.MessageLeaseDuration).ToUnixTimeMilliseconds());
+                command.Parameters.AddWithValue("@Seq", message.Seq);
+                command.Parameters.AddWithValue("@LeaseId", message.LeaseId);
+                var renewed = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                if (renewed != 1)
+                {
+                    // The row was completed or the lease was taken over; nothing left to renew.
+                    return;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                Logger.Info($"Failed to renew the lease for message with native ID `{message.Id}`. Renewal will be retried.", exception);
+            }
+        }
+    }
+
+    async Task HandleFailure(FetchedMessage message, Dictionary<string, string> headers, ReadOnlyMemory<byte> body, Exception exception, ContextBag contextBag, CancellationToken cancellationToken)
     {
         var attempts = failureCounts.AddOrUpdate(message.Id, 1, (_, count) => count + 1);
 
@@ -333,7 +387,7 @@ sealed class SqliteMessageReceiver : IMessageReceiver
         ErrorHandleResult result;
         try
         {
-            var errorContext = new ErrorContext(exception, new Dictionary<string, string>(headers), message.Id, body, errorTransaction, attempts, ReceiveAddress, new ContextBag());
+            var errorContext = new ErrorContext(exception, new Dictionary<string, string>(headers), message.Id, body, errorTransaction, attempts, ReceiveAddress, contextBag);
             result = await onError!(errorContext, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

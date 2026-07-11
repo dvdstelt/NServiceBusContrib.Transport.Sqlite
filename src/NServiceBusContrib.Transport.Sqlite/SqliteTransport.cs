@@ -36,8 +36,9 @@ public class SqliteTransport : TransportDefinition
     public TimeSpan DelayedDeliveryPollInterval { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// How long a received message stays locked while it is being processed. If processing takes
-    /// longer than this, the message becomes visible again and can be processed a second time.
+    /// How long a received message stays locked while it is being processed. The lease is renewed
+    /// in the background at half this interval while the handler is still running, so this only
+    /// determines how quickly a message becomes visible again after an endpoint crashes.
     /// </summary>
     public TimeSpan MessageLeaseDuration { get; set; } = TimeSpan.FromMinutes(5);
 

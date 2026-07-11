@@ -66,18 +66,21 @@ public class SendReceiveTests
     {
         await using var harness = await TransportTestHarness.Start();
         var received = new ConcurrentQueue<string>();
+
+        // Dispatch and let the message expire before the receiver starts, so it cannot legitimately
+        // be consumed inside its time-to-be-received window.
+        var properties = new DispatchProperties
+        {
+            DiscardIfNotReceivedBefore = new DiscardIfNotReceivedBefore(TimeSpan.FromMilliseconds(50)),
+        };
+        await harness.Dispatch("TestEndpoint", messageId: "expired", properties: properties);
+        await Task.Delay(200);
+
         await harness.StartReceiver((context, _) =>
         {
             received.Enqueue(context.NativeMessageId);
             return Task.CompletedTask;
         });
-
-        var properties = new DispatchProperties
-        {
-            DiscardIfNotReceivedBefore = new DiscardIfNotReceivedBefore(TimeSpan.FromMilliseconds(1)),
-        };
-        await harness.Dispatch("TestEndpoint", messageId: "expired", properties: properties);
-        await Task.Delay(100);
         await harness.Dispatch("TestEndpoint", messageId: "fresh");
 
         await TransportTestHarness.WaitUntil(() => received.Contains("fresh"));
