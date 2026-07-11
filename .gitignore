@@ -1,0 +1,35 @@
+## .NET
+bin/
+obj/
+out/
+*.user
+*.suo
+*.userprefs
+*.swp
+*.swo
+
+## Visual Studio / Rider
+.vs/
+.idea/
+.vscode/
+*.userosscache
+*.sln.docstates
+
+## Build outputs
+artifacts/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+## NuGet
+*.nupkg
+*.snupkg
+project.lock.json
+.nuget/
+
+## Local SQLite test databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

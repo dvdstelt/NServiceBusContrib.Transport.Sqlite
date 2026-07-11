@@ -1,0 +1,54 @@
+<Project>
+
+  <Import Project="Custom.Build.props" Condition="Exists('Custom.Build.props')" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel Condition="'$(AnalysisLevel)' == ''">latest</AnalysisLevel>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <NuGetAuditMode Condition="'$(NuGetAuditMode)' == ''">all</NuGetAuditMode>
+
+    <Authors>dvdstelt</Authors>
+    <Company>dvdstelt</Company>
+    <Copyright>Copyright (c) dvdstelt and contributors</Copyright>
+    <PackageProjectUrl>https://github.com/dvdstelt/NServiceBusContrib.Transport.Sqlite</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/dvdstelt/NServiceBusContrib.Transport.Sqlite</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageReadmeFile>Package-README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+
+    <!-- MinVer derives package version from git tags. With no tags it produces
+         {MinVerMinimumMajorMinor}.0-{MinVerDefaultPreReleaseIdentifiers}.{height}, e.g. 0.1.0-alpha.0.3. -->
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+
+    <!-- Centralised tooling versions (used by inline PackageReferences below).
+         Note: do not name a property "MinVerVersion" - that is a reserved MinVer property
+         that overrides version detection. -->
+    <ParticularAnalyzersVersion>1.8.0</ParticularAnalyzersVersion>
+    <MinVerPackageVersion>7.0.0</MinVerPackageVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(CI)' != ''">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Particular.Analyzers" Version="$(ParticularAnalyzersVersion)" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <PackageReference Include="MinVer" Version="$(MinVerPackageVersion)" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

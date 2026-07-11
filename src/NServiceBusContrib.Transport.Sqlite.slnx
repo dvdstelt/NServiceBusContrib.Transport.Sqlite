@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="NServiceBusContrib.Transport.Sqlite/NServiceBusContrib.Transport.Sqlite.csproj" />
+  <Project Path="NServiceBusContrib.Transport.Sqlite.Tests/NServiceBusContrib.Transport.Sqlite.Tests.csproj" />
+</Solution>
