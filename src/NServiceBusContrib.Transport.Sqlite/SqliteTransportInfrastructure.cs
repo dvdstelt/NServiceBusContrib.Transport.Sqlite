@@ -22,7 +22,8 @@ sealed class SqliteTransportInfrastructure : TransportInfrastructure
 
         connectionFactory = new DefaultConnectionFactory(transport.ConnectionString);
         tables = new TransportTables(transport.TablePrefix);
-        delayedPump = new DelayedMessagePump(connectionFactory, tables, transport.DelayedDeliveryPollInterval);
+        var errorQueue = receiveSettings.Select(settings => settings.ErrorQueue).FirstOrDefault(queue => !string.IsNullOrEmpty(queue));
+        delayedPump = new DelayedMessagePump(connectionFactory, tables, transport.DelayedDeliveryPollInterval, errorQueue);
         Dispatcher = new SqliteMessageDispatcher(connectionFactory, tables);
 
         var receivers = new Dictionary<string, IMessageReceiver>();

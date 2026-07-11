@@ -34,7 +34,8 @@ sealed class TransportTables(string tablePrefix)
             Due INTEGER NOT NULL,
             Headers TEXT NOT NULL,
             Body BLOB NOT NULL,
-            Expires INTEGER NULL
+            Expires INTEGER NULL,
+            FailedAttempts INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS {Quote(tablePrefix + DelayedTableSuffix + "_due_idx")} ON {DelayedTable} (Due);
         """;

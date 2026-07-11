@@ -54,4 +54,24 @@ public class DelayedDeliveryTests
         var arrived = await receivedAt.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.That(arrived, Is.GreaterThanOrEqualTo(deliverAt.AddMilliseconds(-50)));
     }
+
+    [Test]
+    public async Task DeadLettersDelayedMessageWhenDestinationIsMissing()
+    {
+        await using var harness = await TransportTestHarness.Start();
+
+        // "MissingDestination" has no queue table, so the pump can never move this message.
+        var properties = new DispatchProperties
+        {
+            DelayDeliveryWith = new DelayDeliveryWith(TimeSpan.FromMilliseconds(50)),
+        };
+        await harness.Dispatch("MissingDestination", messageId: "poison-delayed", properties: properties);
+
+        await TransportTestHarness.WaitUntil(async () => await harness.CountRows("error") == 1, timeoutSeconds: 15);
+        Assert.That(await harness.CountRows("nsbc.delayed"), Is.EqualTo(0));
+
+        var headers = await harness.QueryScalarString("SELECT Headers FROM \"error\" LIMIT 1;");
+        Assert.That(headers, Does.Contain("MissingDestination"));
+        Assert.That(headers, Does.Contain("DelayedDeliveryFailure"));
+    }
 }

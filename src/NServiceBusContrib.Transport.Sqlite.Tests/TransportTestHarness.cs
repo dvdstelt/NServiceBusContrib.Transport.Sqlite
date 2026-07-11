@@ -94,6 +94,15 @@ sealed class TransportTestHarness : IAsyncDisposable
         return (long)(await command.ExecuteScalarAsync())!;
     }
 
+    public async Task<string?> QueryScalarString(string sql)
+    {
+        await using var connection = new SqliteConnection(ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (string?)await command.ExecuteScalarAsync();
+    }
+
     public async Task<bool> TableExists(string table)
     {
         await using var connection = new SqliteConnection(ConnectionString);
