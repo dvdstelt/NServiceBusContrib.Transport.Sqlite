@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Justification: shared NServiceBus.TransportTests.Sources content files predate stricter analyzer rules. -->
+    <NoWarn>$(NoWarn);CA2007;CS8600;CS8601;CS8602;CS8603;CS8604;CS8605;CS8613;CS8614;CS8618;CS8622;CS8625;CS8767;PS0013;PS0018;NSB0002;NSB0004;NSB0005;NSB0009;NSB0012</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="NServiceBus" Version="10.1.4" />
+    <PackageReference Include="NServiceBus.TransportTests.Sources" Version="10.1.4" />
+    <PackageReference Include="NUnit" Version="4.6.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="NUnit.Analyzers" Version="4.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NServiceBusContrib.Transport.Sqlite\NServiceBusContrib.Transport.Sqlite.csproj" />
+  </ItemGroup>
+
+</Project>

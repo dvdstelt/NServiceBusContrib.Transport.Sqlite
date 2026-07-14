@@ -33,3 +33,6 @@ project.lock.json
 *.db-journal
 *.db-wal
 *.db-shm
+
+## Plan files (never committed)
+plan-*.md

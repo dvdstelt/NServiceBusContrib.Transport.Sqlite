@@ -1,0 +1,153 @@
+name: Publish
+
+# Publish the package to NuGet when a SemVer tag is pushed. MinVer derives the
+# version from the tag, so the tag name IS the package version.
+#
+# Policy (enforced by the "Validate tag" step in the build job):
+#   - on main:      stable tags only (e.g. 1.0.0). alpha/beta tags on main are rejected.
+#   - on a branch:  prerelease tags only (e.g. 0.1.0-alpha.1), and only if the tagged commit
+#                   has an open PR. Stable tags off main are rejected.
+#   - anything else (a tag on neither main nor a PR branch) is rejected.
+# So a stable release can only ever come from a tag on main (after merge).
+#
+# The publish job runs in the "nuget" environment. Add a required reviewer to that
+# environment (repo Settings -> Environments -> nuget) so the actual push to NuGet
+# waits for manual approval after the build succeeds.
+#
+# Trusted publishing (OIDC) - no long-lived API key. nuget.org policy:
+#   Owner: dvdstelt / Repository: NServiceBusContrib.Transport.Sqlite / Workflow: publish.yml
+#
+# After the package is live on NuGet, a GitHub Release is created for the tag with
+# auto-generated notes, a link to the package, and the .nupkg/.snupkg files attached.
+# A tag with a prerelease suffix (e.g. 0.1.0-alpha.1) is marked as a prerelease.
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read    # to check whether the tagged commit has an open PR
+    steps:
+      - name: Checkout (full history + tags for MinVer)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag (main = stable, PR branch = prerelease)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main || true
+
+          case "$TAG" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then on_main=true; else on_main=false; fi
+          echo "tag=$TAG prerelease=$prerelease on_main=$on_main"
+
+          if $on_main; then
+            if $prerelease; then
+              echo "::error::Prerelease (alpha/beta) tags are not allowed on main. Release the stable version by tagging on main; tag prereleases on a PR branch."
+              exit 1
+            fi
+            echo "Stable release from main: OK."
+          else
+            if ! $prerelease; then
+              echo "::error::Stable tags must be created on main. Tag prereleases (e.g. 0.1.0-alpha.1) on a PR branch, and release the stable version by tagging on main after the PR is merged."
+              exit 1
+            fi
+            open_prs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.state == "open")] | length')
+            if [ "${open_prs:-0}" -eq 0 ]; then
+              echo "::error::This prerelease tag is not on a commit with an open PR. Tag prereleases on a PR branch."
+              exit 1
+            fi
+            echo "Prerelease from a PR branch ($open_prs open PR(s)): OK."
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Test
+        run: dotnet test src/NServiceBusContrib.Transport.Sqlite.slnx -c Release
+
+      - name: Pack
+        run: dotnet pack src/NServiceBusContrib.Transport.Sqlite.slnx -c Release -o artifacts -p:ContinuousIntegrationBuild=true
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: nuget         # required reviewer -> manual approval before the push
+    permissions:
+      contents: write          # create the GitHub Release for the tag
+      id-token: write          # OIDC token for trusted publishing
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: artifacts
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: NuGet login (OIDC -> short-lived API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: dvdstelt
+
+      - name: Push to NuGet
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      # Only after the package is live: create the Release so it never links to a
+      # package that failed to publish.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so tell gh which repo to target instead of
+          # letting it infer one from a (nonexistent) local git remote.
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # Prerelease tags carry a suffix (0.1.0-alpha.1); stable tags do not (1.0.0).
+          case "$TAG" in *-*) prerelease="--prerelease" ;; *) prerelease="" ;; esac
+
+          {
+            echo "### NuGet packages"
+            echo
+            echo "- [NServiceBusContrib.Transport.Sqlite $TAG](https://www.nuget.org/packages/NServiceBusContrib.Transport.Sqlite/$TAG)"
+          } > release-notes.md
+
+          # --generate-notes appends the auto-generated commit/PR changelog after the package link.
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --generate-notes \
+            $prerelease \
+            artifacts/*.nupkg artifacts/*.snupkg

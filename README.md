@@ -50,11 +50,13 @@ var transport = new SqliteTransport("Data Source=transport.db")
 | Time to be received (TTBR) | Supported |
 | TransactionScope | Not supported (`Microsoft.Data.Sqlite` cannot enlist in ambient transactions) |
 
+The transport passes the official `NServiceBus.TransportTests` conformance suite for all three supported transaction modes.
+
 ## How it works
 
-- Each queue is a table `"<prefix><queue name>"` with columns `Seq`, `Id`, `Headers` (JSON), `Body`, `Expires`.
-- Receiving deletes the oldest row inside a SQLite transaction (`DELETE ... RETURNING`). With `SendsAtomicWithReceive`, outgoing messages are inserted using the same connection and transaction, so sends roll back together with the receive.
-- Delayed messages go to `"<prefix>nsbc.delayed"` and are moved to their destination queue by a background pump once due.
+- Each queue is a table `"<prefix><queue name>"` with columns `Seq`, `Id`, `Headers` (JSON), `Body`, `Expires`, plus lease columns (`LockedUntil`, `LeaseId`).
+- Receiving is lease-based: a single atomic `UPDATE ... RETURNING` locks the oldest eligible row, so no SQLite write transaction is held open while a handler runs. The lease is renewed in the background for long-running handlers; when an endpoint crashes, the message becomes visible again after `MessageLeaseDuration`. On success, one short transaction deletes the row. With `SendsAtomicWithReceive`, outgoing messages are buffered during processing and inserted in that same completing transaction, so sends commit or roll back together with the receive.
+- Delayed messages go to `"<prefix>nsbc.delayed"` and are moved to their destination queue by a background pump once due. A delayed message that repeatedly fails to move (for example because its destination queue does not exist) is forwarded to the error queue after five attempts, with headers recording the original destination and the failure reason.
 - Subscriptions are rows in `"<prefix>nsbc.subscriptions"`. Publishing walks the event type's base types and interfaces and inserts the message into every subscriber's queue in one transaction.
 - The database runs in WAL mode with `busy_timeout` set, so concurrent endpoints in separate processes can share the file.
 
